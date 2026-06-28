@@ -52,6 +52,12 @@ class CandidateProfile(BaseModel):
     projects: list[str] = Field(default_factory=list)
 
 
+class JDRequirements(BaseModel):
+    required_skills: list[str] = Field(default_factory=list)
+    preferred_qualifications: list[str] = Field(default_factory=list)
+    experience_required: str = ""
+
+
 @dataclass(frozen=True)
 class ValidationResult:
     """Represents a safe validation outcome for user inputs."""
@@ -175,6 +181,18 @@ def build_resume_prompt(resume_text: str) -> str:
     )
 
 
+def build_jd_prompt(jd_text: str) -> str:
+    """Build the Gemini prompt used for structured JD extraction."""
+
+    return (
+        "You are a strict job description analysis engine.\n"
+        "Extract the job requirements from the text below.\n"
+        "Return only the fields required by the schema.\n"
+        "If a field is missing, use an empty string or an empty list.\n\n"
+        f"JOB DESCRIPTION TEXT:\n{jd_text}"
+    )
+
+
 def parse_resume_with_ai(
     resume_text: str | genai.Client,
     api_key: str | None = None,
@@ -215,3 +233,34 @@ def parse_resume_with_ai(
         return CandidateProfile.model_validate(parsed_json)
     except Exception as exc:  # pragma: no cover - defensive fallback for SDK output
         raise ValueError("Gemini returned data that did not match the resume schema.") from exc
+
+
+def analyze_job_description(jd_text: str, api_key: str) -> JDRequirements:
+    """Analyze a job description into structured requirements using Gemini."""
+
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise ValueError("A valid Gemini API key is required for job description analysis.")
+
+    client = genai.Client(api_key=api_key)
+    prompt = build_jd_prompt(jd_text)
+    config = types.GenerateContentConfig(
+        responseMimeType="application/json",
+        responseSchema=JDRequirements,
+        temperature=0,
+    )
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=config,
+    )
+
+    raw_json = getattr(response, "text", None)
+    if not raw_json:
+        raise ValueError("Gemini did not return a JSON response for the job description.")
+
+    try:
+        parsed_json = json.loads(raw_json)
+        return JDRequirements.model_validate(parsed_json)
+    except Exception as exc:  # pragma: no cover - defensive fallback for SDK output
+        raise ValueError("Gemini returned data that did not match the JD schema.") from exc
