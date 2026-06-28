@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from io import StringIO
+
+import pandas as pd
 import streamlit as st
-from google import genai
 
 import utils
 
@@ -9,6 +11,8 @@ import utils
 st.set_page_config(page_title="AI Resume Screening & Ranking", layout="wide")
 
 utils.initialize_session_state(st.session_state)
+st.session_state.setdefault("structured_jd", None)
+st.session_state.setdefault("ranked_results", [])
 
 with st.sidebar:
     st.header("Configuration")
@@ -37,7 +41,7 @@ with col2:
 
 st.markdown("---")
 
-if st.button("Analyze Candidates", type="primary", use_container_width=True):
+if st.button("Analyze & Rank Candidates", type="primary", use_container_width=True):
     if not api_key:
         st.error("Please provide your Gemini API key in the sidebar.")
     elif not jd_input.strip():
@@ -46,32 +50,93 @@ if st.button("Analyze Candidates", type="primary", use_container_width=True):
         st.warning("Please upload at least one resume.")
     else:
         try:
-            client = genai.Client(api_key=api_key)
-            parsed_candidates: list[dict] = []
-            parse_errors: list[str] = []
+            with st.spinner("Analyzing job description and ranking candidates..."):
+                structured_jd = utils.analyze_job_description(jd_input, api_key)
 
-            with st.spinner("Extracting and parsing resumes..."):
+                ranked_candidates: list[dict] = []
+                parse_errors: list[str] = []
                 for uploaded_file in uploaded_files:
                     try:
                         resume_text = utils.extract_pdf_text(uploaded_file)
-                        candidate_profile = utils.parse_resume_with_ai(client, resume_text)
-                        parsed_candidates.append(candidate_profile.model_dump())
-                    except Exception as exc:
-                        parse_errors.append(f"{getattr(uploaded_file, 'name', 'resume.pdf')}: {exc}")
+                        candidate_profile = utils.parse_resume_with_ai(resume_text, api_key)
+                        match_score = utils.calculate_match_score(resume_text, jd_input)
+                        candidate_record = candidate_profile.model_dump()
+                        candidate_record["filename"] = getattr(uploaded_file, "name", "resume.pdf")
+                        candidate_record["match_score"] = match_score
+                        ranked_candidates.append(candidate_record)
+                    except Exception as file_exc:
+                        parse_errors.append(f"{getattr(uploaded_file, 'name', 'resume.pdf')}: {file_exc}")
 
-            st.session_state["parsed_candidates"] = parsed_candidates
+                ranked_candidates.sort(key=lambda candidate: candidate.get("match_score", 0), reverse=True)
 
-            if parsed_candidates and not parse_errors:
-                st.success(f"Parsed {len(parsed_candidates)} resume(s) successfully. Ready for Step 3.")
-            elif parsed_candidates and parse_errors:
-                st.warning(f"Parsed {len(parsed_candidates)} resume(s) with {len(parse_errors)} error(s).")
-                for error in parse_errors:
-                    st.error(error)
-            else:
-                st.error("No resumes could be parsed. Please review the uploaded files and try again.")
+                st.session_state["structured_jd"] = structured_jd.model_dump()
+                st.session_state["ranked_results"] = ranked_candidates
+
+            st.success(f"Processed {len(ranked_candidates)} candidate(s) successfully.")
+            if parse_errors:
+                st.warning(f"{len(parse_errors)} resume(s) could not be processed.")
                 for error in parse_errors:
                     st.error(error)
         except Exception as exc:
-            st.session_state["parsed_candidates"] = []
-            st.error("An unexpected error occurred while processing resumes.")
+            st.session_state["structured_jd"] = None
+            st.session_state["ranked_results"] = []
+            st.error("An unexpected error occurred while processing the candidates.")
             st.exception(exc)
+
+
+structured_jd = st.session_state.get("structured_jd")
+ranked_results = st.session_state.get("ranked_results", [])
+
+if structured_jd:
+    with st.expander("Structured Job Description", expanded=True):
+        st.write("Experience Required")
+        st.write(structured_jd.get("experience_required", ""))
+        st.write("Required Skills")
+        st.write(structured_jd.get("required_skills", []))
+        st.write("Preferred Qualifications")
+        st.write(structured_jd.get("preferred_qualifications", []))
+
+if ranked_results:
+    leaderboard_rows = []
+    for index, candidate in enumerate(ranked_results, start=1):
+        leaderboard_rows.append(
+            {
+                "Rank": index,
+                "Candidate Name": candidate.get("name", ""),
+                "Email": candidate.get("email", ""),
+                "Match Score": candidate.get("match_score", 0),
+                "Filename": candidate.get("filename", ""),
+            }
+        )
+
+    leaderboard_df = pd.DataFrame(leaderboard_rows)
+
+    st.subheader("Candidate Leaderboard")
+    st.dataframe(leaderboard_df, use_container_width=True, hide_index=True)
+
+    csv_buffer = StringIO()
+    leaderboard_df.to_csv(csv_buffer, index=False)
+    st.download_button(
+        label="Download Leaderboard CSV",
+        data=csv_buffer.getvalue(),
+        file_name="candidate_leaderboard.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    st.subheader("Candidate Deep Dive")
+    for index, candidate in enumerate(ranked_results, start=1):
+        title = f"Rank {index}: {candidate.get('name', 'Unknown Candidate')} ({candidate.get('filename', 'resume.pdf')})"
+        with st.expander(title):
+            st.write("Email")
+            st.write(candidate.get("email", ""))
+            st.write("Phone")
+            st.write(candidate.get("phone", ""))
+            st.write("Skills")
+            st.write(candidate.get("skills", []))
+            st.write("Certifications")
+            st.write(candidate.get("certifications", []))
+            st.write("Work History")
+            st.write(candidate.get("work_experience", []))
+            st.write("Projects")
+            st.write(candidate.get("projects", []))
