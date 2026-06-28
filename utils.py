@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import io
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
@@ -45,10 +46,10 @@ class CandidateProfile(BaseModel):
     email: str = ""
     phone: str = ""
     skills: list[str] = Field(default_factory=list)
-    education: list[EducationEntry] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list)
     certifications: list[str] = Field(default_factory=list)
-    experience: list[ExperienceEntry] = Field(default_factory=list)
-    projects: list[ProjectEntry] = Field(default_factory=list)
+    work_experience: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -175,13 +176,24 @@ def build_resume_prompt(resume_text: str) -> str:
 
 
 def parse_resume_with_ai(
-    client: genai.Client,
-    resume_text: str,
+    resume_text: str | genai.Client,
+    api_key: str | None = None,
     model_name: str = DEFAULT_GEMINI_MODEL,
 ) -> CandidateProfile:
     """Parse a raw resume into a structured candidate profile using Gemini."""
 
-    prompt = build_resume_prompt(resume_text)
+    if isinstance(resume_text, genai.Client):
+        client = resume_text
+        if not isinstance(api_key, str) or not api_key.strip():
+            raise ValueError("Provide resume text when passing a Gemini client instance.")
+        resume_text_value = api_key
+    else:
+        resume_text_value = resume_text
+        if not isinstance(api_key, str) or not api_key.strip():
+            raise ValueError("A valid Gemini API key is required for resume parsing.")
+        client = genai.Client(api_key=api_key)
+
+    prompt = build_resume_prompt(resume_text_value)
     config = types.GenerateContentConfig(
         responseMimeType="application/json",
         responseSchema=CandidateProfile,
@@ -199,6 +211,7 @@ def parse_resume_with_ai(
         raise ValueError("Gemini did not return a JSON response for the resume.")
 
     try:
-        return CandidateProfile.model_validate_json(raw_json)
+        parsed_json = json.loads(raw_json)
+        return CandidateProfile.model_validate(parsed_json)
     except Exception as exc:  # pragma: no cover - defensive fallback for SDK output
         raise ValueError("Gemini returned data that did not match the resume schema.") from exc
