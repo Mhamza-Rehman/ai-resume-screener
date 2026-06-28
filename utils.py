@@ -8,13 +8,17 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 import pdfplumber
+import streamlit as st
 from google import genai
 from google.genai import types
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from pydantic import BaseModel, Field
 
 
 SUPPORTED_RESUME_MIME_TYPES: tuple[str, ...] = ("application/pdf",)
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 class EducationEntry(BaseModel):
@@ -264,3 +268,29 @@ def analyze_job_description(jd_text: str, api_key: str) -> JDRequirements:
         return JDRequirements.model_validate(parsed_json)
     except Exception as exc:  # pragma: no cover - defensive fallback for SDK output
         raise ValueError("Gemini returned data that did not match the JD schema.") from exc
+
+
+@st.cache_resource
+def load_embedding_model() -> SentenceTransformer:
+    """Load and cache the sentence transformer model once per process."""
+
+    return SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
+
+
+def calculate_match_score(resume_text: str, jd_text: str) -> int:
+    """Calculate a semantic match score between resume and job description."""
+
+    cleaned_resume_text = (resume_text or "").strip()
+    cleaned_jd_text = (jd_text or "").strip()
+    if not cleaned_resume_text or not cleaned_jd_text:
+        return 0
+
+    try:
+        model = load_embedding_model()
+        embeddings = model.encode([cleaned_resume_text, cleaned_jd_text], normalize_embeddings=True)
+        similarity_matrix = cosine_similarity([embeddings[0]], [embeddings[1]])
+        similarity_score = float(similarity_matrix[0][0])
+        percentage_score = round(max(0.0, min(similarity_score, 1.0)) * 100)
+        return int(percentage_score)
+    except Exception as exc:  # pragma: no cover - defensive fallback for embedding failures
+        raise ValueError(f"Failed to calculate semantic match score: {exc}") from exc
