@@ -153,7 +153,7 @@ def _uploaded_file_to_bytes(uploaded_file: Any) -> bytes:
 
 
 def extract_pdf_text(uploaded_file: Any) -> str:
-    """Extract text from a PDF resume using pdfplumber."""
+    
 
     pdf_bytes = _uploaded_file_to_bytes(uploaded_file)
     pages_text: list[str] = []
@@ -174,7 +174,7 @@ def extract_pdf_text(uploaded_file: Any) -> str:
 
 
 def build_resume_prompt(resume_text: str) -> str:
-    """Build the Gemini prompt used for structured resume extraction."""
+    """Gemini prompt used for structured resume extraction"""
 
     return (
         "You are a strict resume parsing engine.\n"
@@ -186,7 +186,7 @@ def build_resume_prompt(resume_text: str) -> str:
 
 
 def build_jd_prompt(jd_text: str) -> str:
-    """Build the Gemini prompt used for structured JD extraction."""
+    """Gemini prompt used for structured JD extraction."""
 
     return (
         "You are a strict job description analysis engine.\n"
