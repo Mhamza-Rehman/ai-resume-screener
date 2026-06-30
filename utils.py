@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 
 SUPPORTED_RESUME_MIME_TYPES: tuple[str, ...] = ("application/pdf",)
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
@@ -254,7 +254,7 @@ def analyze_job_description(jd_text: str, api_key: str) -> JDRequirements:
     )
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=DEFAULT_GEMINI_MODEL,
         contents=prompt,
         config=config,
     )
